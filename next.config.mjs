@@ -3,6 +3,16 @@ const nextConfig = {
   distDir: '.next',
   output: 'standalone',
 
+  // Images configuration
+  images: {
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'zdirmkypfxuamjbdkwhb.supabase.co',
+      },
+    ],
+  },
+
   // Disable ESLint during build to fix serialization error
   eslint: {
     ignoreDuringBuilds: true,
