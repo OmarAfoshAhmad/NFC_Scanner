@@ -1,13 +1,14 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   distDir: '.next',
+  output: 'standalone',
 
   // Disable ESLint during build to fix serialization error
   eslint: {
     ignoreDuringBuilds: true,
   },
 
-  // App Router configuration
+  // Disable static page generation
   experimental: {
     optimizePackageImports: ['lucide-react'],
   },
