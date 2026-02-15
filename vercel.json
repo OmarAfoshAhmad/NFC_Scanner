@@ -1,5 +1,6 @@
 {
     "buildCommand": "rm -rf .next && npm run build",
+    "installCommand": "rm -rf node_modules/.cache && npm install",
     "crons": [
         {
             "path": "/api/backups",
