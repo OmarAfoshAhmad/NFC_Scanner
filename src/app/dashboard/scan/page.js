@@ -30,6 +30,7 @@ export default function ScanPage() {
     const [hwStatus, setHwStatus] = useState('disconnected'); // 'disconnected', 'connected', 'error'
     const [hwReader, setHwReader] = useState(null);
     const nfcReaderRef = useRef(null);
+    const terminalsRef = useRef([]);
     const currency = pageSettings?.currency_symbol || '$';
 
     const router = useRouter();
@@ -264,6 +265,7 @@ export default function ScanPage() {
             .then(data => {
                 const fetchedTerminals = data.data || [];
                 setTerminals(fetchedTerminals);
+                terminalsRef.current = fetchedTerminals;
 
                 // Initialize activity state
                 const activityMap = {};
@@ -298,13 +300,15 @@ export default function ScanPage() {
                 (payload) => {
                     console.log(`[Realtime-Terminals] Terminal Updated:`, payload.new.id, payload.new.last_sync);
                     // Update specific terminal's last_sync for real-time online/offline indicator
-                    setTerminals(prev =>
-                        prev.map(t =>
+                    setTerminals(prev => {
+                        const updated = prev.map(t =>
                             t.id === payload.new.id
                                 ? { ...t, last_sync: payload.new.last_sync }
                                 : t
-                        )
-                    );
+                        );
+                        terminalsRef.current = updated;
+                        return updated;
+                    });
                 }
             );
 
@@ -343,7 +347,7 @@ export default function ScanPage() {
                 (payload) => {
                     const { terminal_id, created_at } = payload.new;
                     // Check if this terminal belongs to our currently loaded terminals
-                    if (terminals.some(t => t.id === terminal_id)) {
+                    if (terminalsRef.current.some(t => t.id === terminal_id)) {
                         console.log(`[Realtime-Status] Activity detected for Terminal ${terminal_id}`);
                         setTerminalActivity(prev => ({
                             ...prev,
@@ -358,7 +362,7 @@ export default function ScanPage() {
             channel.unsubscribe();
             supabase.removeChannel(channel);
         };
-    }, [selectedBranch, terminals]);
+    }, [selectedBranch]);
 
     useEffect(() => {
         if (!selectedTerminal || isElectron) {
