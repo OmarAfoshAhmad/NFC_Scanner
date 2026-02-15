@@ -364,6 +364,13 @@ export default function ScanPage() {
         };
     }, [selectedBranch]);
 
+
+    // Create a ref for scanResult to access inside useEffect without dependency
+    const scanResultRef = useRef(scanResult);
+    useEffect(() => {
+        scanResultRef.current = scanResult;
+    }, [scanResult]);
+
     useEffect(() => {
         if (!selectedTerminal || isElectron) {
             console.log('[Realtime] No terminal selected or using Electron - skipping subscription');
@@ -409,8 +416,9 @@ export default function ScanPage() {
                         console.log(`[Realtime] Processing UID: ${uid} (Event ID: ${eventId})`);
 
                         // If we already have a different card, clear it first before processing the new one
-                        if (scanResult && scanResult.card && scanResult.card.uid !== uid) {
-                            console.log(`[Realtime] Different card detected. Clearing previous: ${scanResult.card.uid}`);
+                        // USE REF HERE instead of state
+                        if (scanResultRef.current && scanResultRef.current.card && scanResultRef.current.card.uid !== uid) {
+                            console.log(`[Realtime] Different card detected. Clearing previous: ${scanResultRef.current.card.uid}`);
                             resetScan();
                         }
 
@@ -418,7 +426,7 @@ export default function ScanPage() {
                         if (processingRef.current) {
                             console.warn('[Realtime] IGNORED: Already busy processing another scan.');
                             // Still update the UI to show the card is present if it's the same card
-                            if (scanResult?.card?.uid === uid) {
+                            if (scanResultRef.current?.card?.uid === uid) {
                                 // Refresh logic could go here if needed
                             }
                             return;
@@ -488,7 +496,7 @@ export default function ScanPage() {
             channel.unsubscribe();
             supabase.removeChannel(channel);
         };
-    }, [selectedTerminal, retryKey, isElectron, scanResult, resetScan, processScan, t]);
+    }, [selectedTerminal, retryKey, isElectron, processScan, t]); // Removed scanResult and resetScan
 
     // Polling Fallback (Backup for WebSocket)
     useEffect(() => {
@@ -1059,12 +1067,19 @@ function CheckoutForm({ customer, card, rewards, coupons, manualCampaigns, campa
 
 
     // Filter valid coupons - Show individually (no grouping for split bundles)
-    const walletItems = customerCoupons.map(coupon => ({
-        ...coupon,
-        individualDiscount: coupon.metadata?.discount_value || null,
-        originalTotal: coupon.metadata?.original_total || null,
-        part: coupon.metadata?.part || null
-    }));
+    const walletItems = customerCoupons
+        .filter(c => {
+            // Filter out consumed parts (0)
+            const p = c.metadata?.part;
+            if (p === 0 || p === '0') return false;
+            return true;
+        })
+        .map(coupon => ({
+            ...coupon,
+            individualDiscount: coupon.metadata?.discount_value || null,
+            originalTotal: coupon.metadata?.original_total || null,
+            part: coupon.metadata?.part || null
+        }));
 
     // --- CALCULATIONS FOR PREVIEW ---
     const billAmount = parseFloat(amount) || 0;
@@ -1633,12 +1648,14 @@ function CheckoutForm({ customer, card, rewards, coupons, manualCampaigns, campa
                     <div className="space-y-8 pb-8">
                         {Object.entries(
                             walletItems.reduce((acc, item) => {
-                                const type = item.metadata?.bundle_type || 'default';
-                                if (!acc[type]) acc[type] = [];
-                                acc[type].push(item);
+                                // Group by campaign_id AND bundle_type to prevent mixing different bundle types
+                                const bundleType = item.metadata?.bundle_type || '';
+                                const groupKey = `${item.campaign_id || 'default'}_${bundleType}`;
+                                if (!acc[groupKey]) acc[groupKey] = [];
+                                acc[groupKey].push(item);
                                 return acc;
                             }, {})
-                        ).map(([type, items]) => {
+                        ).map(([groupKey, items]) => {
                             // Consistent sorting: Bonus/Total cards first (will appear on the far right in RTL)
                             const sortedItems = [...items].sort((a, b) => {
                                 const checkBonus = (item) => {
@@ -1657,13 +1674,18 @@ function CheckoutForm({ customer, card, rewards, coupons, manualCampaigns, campa
                                 return aPart - bPart;
                             });
 
+                            // Get campaign name and bundle type from first item (all items in group have same campaign_id)
+                            const campaignName = items[0]?.campaigns?.name || 'default';
+                            const bundleType = items[0]?.metadata?.bundle_type || '';
+                            const isMeatBundle = bundleType.includes('meat') || campaignName.toLowerCase().includes('لحم');
+
                             return (
-                                <div key={type} className="animate-in fade-in slide-in-from-bottom-2">
+                                <div key={groupKey} className="animate-in fade-in slide-in-from-bottom-2">
                                     <div className="flex items-center justify-between mb-4 px-1">
                                         <div className="flex items-center gap-2">
-                                            <div className={`w-2 h-6 rounded-full ${type.includes('meat') ? 'bg-red-500' : 'bg-purple-500'}`} />
+                                            <div className={`w-2 h-6 rounded-full ${isMeatBundle ? 'bg-red-500' : 'bg-purple-500'}`} />
                                             <span className="text-sm font-black text-slate-600 dark:text-slate-300 uppercase tracking-widest">
-                                                {sortedItems[0]?.campaigns?.name || type}
+                                                {campaignName}
                                             </span>
                                             <span className="text-[10px] font-bold text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">{sortedItems.length}</span>
                                         </div>
