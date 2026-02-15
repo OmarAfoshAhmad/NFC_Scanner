@@ -1072,6 +1072,24 @@ function CheckoutForm({ customer, card, rewards, coupons, manualCampaigns, campa
             // Filter out consumed parts (0)
             const p = c.metadata?.part;
             if (p === 0 || p === '0') return false;
+            
+            // Hide BUNDLE_BONUS if there are still active PAID_PACKAGE coupons from same bundle
+            const source = c.metadata?.source;
+            const bundleType = c.metadata?.bundle_type;
+            if (source === 'BUNDLE_BONUS' && bundleType) {
+                // Check if there are active PAID_PACKAGE coupons with same bundle_type
+                const hasActiveSplitCoupons = customerCoupons.some(other => 
+                    other.metadata?.source === 'PAID_PACKAGE' &&
+                    other.metadata?.bundle_type === bundleType &&
+                    other.status === 'ACTIVE' &&
+                    other.metadata?.part !== 0 &&
+                    other.metadata?.part !== '0'
+                );
+                if (hasActiveSplitCoupons) {
+                    return false; // Hide the bonus coupon until split coupons are used
+                }
+            }
+            
             return true;
         })
         .map(coupon => ({
