@@ -28,12 +28,6 @@ export default function CardsPage() {
     const [showDeleted, setShowDeleted] = useState(false);
     const [error, setError] = useState('');
 
-    useEffect(() => {
-        setMounted(true);
-        fetchData();
-        fetchSettings();
-    }, [fetchData, fetchSettings]);
-
     const fetchSettings = useCallback(async () => {
         try {
             const res = await fetch('/api/settings');
@@ -60,11 +54,18 @@ export default function CardsPage() {
             setCards(cardsData.data || []);
             setCustomers(customersData.data || []);
         } catch (e) {
-            toast.error(t('error_loading'));
+            console.error('Failed to load data', e);
+            setError('Failed to load data');
         } finally {
             setLoading(false);
         }
-    }, [showDeleted, t]);
+    }, [showDeleted]);
+
+    useEffect(() => {
+        setMounted(true);
+        fetchData();
+        fetchSettings();
+    }, [fetchData, fetchSettings]);
 
     // Helper to determine card status
     const getCardStatus = (card) => {
