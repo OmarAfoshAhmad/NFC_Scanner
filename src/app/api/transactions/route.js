@@ -250,12 +250,11 @@ export async function POST(request) {
                 console.error('CRITICAL: Failed to mark coupon as USED:', updateErr);
             }
 
-            // NEW: If this coupon is from a bundle split (PAID_PACKAGE), reduce the bonus bundle
+            // NEW: If this coupon is from a bundle split (PAID_PACKAGE), mark the BUNDLE_BONUS as USED immediately
             if (usedCoupon?.metadata?.source === 'PAID_PACKAGE' && usedCoupon?.metadata?.transaction_id) {
-                const usedDiscountValue = usedCoupon.metadata.discount_value || 0;
                 const originalTransactionId = usedCoupon.metadata.transaction_id;
 
-                // Find the related BUNDLE_BONUS coupon from the same purchase
+                // Find and immediately mark the BUNDLE_BONUS coupon as USED
                 const { data: bonusCoupon } = await supabaseAdmin
                     .from('customer_coupons')
                     .select('*')
@@ -265,49 +264,24 @@ export async function POST(request) {
                     .eq('metadata->>transaction_id', originalTransactionId)
                     .single();
 
-                if (bonusCoupon && bonusCoupon.metadata?.discount_value > 0) {
-                    const currentBonusValue = bonusCoupon.metadata.discount_value;
-                    const newBonusValue = Math.max(0, currentBonusValue - usedDiscountValue);
+                if (bonusCoupon) {
+                    await supabaseAdmin
+                        .from('customer_coupons')
+                        .update({
+                            status: 'USED',
+                            used_at: new Date().toISOString(),
+                            metadata: {
+                                ...bonusCoupon.metadata,
+                                disabled_by_split_use: true,
+                                disabled_at: new Date().toISOString()
+                            }
+                        })
+                        .eq('id', bonusCoupon.id);
 
-                    console.log(`[BUNDLE] Reducing bonus from ${currentBonusValue}% to ${newBonusValue}% (used ${usedDiscountValue}%)`);
-
-                    if (newBonusValue > 0) {
-                        // Update the bonus coupon with reduced value
-                        await supabaseAdmin
-                            .from('customer_coupons')
-                            .update({
-                                metadata: {
-                                    ...bonusCoupon.metadata,
-                                    discount_value: newBonusValue,
-                                    original_bonus: currentBonusValue,
-                                    reductions: [...(bonusCoupon.metadata.reductions || []), {
-                                        used_coupon_id: coupon_id,
-                                        reduced_by: usedDiscountValue,
-                                        at: new Date().toISOString()
-                                    }]
-                                }
-                            })
-                            .eq('id', bonusCoupon.id);
-                    } else {
-                        // Bonus fully consumed - mark as USED
-                        await supabaseAdmin
-                            .from('customer_coupons')
-                            .update({
-                                status: 'USED',
-                                used_at: new Date().toISOString(),
-                                metadata: {
-                                    ...bonusCoupon.metadata,
-                                    discount_value: 0,
-                                    fully_consumed: true
-                                }
-                            })
-                            .eq('id', bonusCoupon.id);
-
-                        console.log(`[BUNDLE] Bonus coupon fully consumed and marked as USED`);
-                    }
+                    console.log(`[BUNDLE] Split coupon used - BUNDLE_BONUS marked as USED immediately`);
                 }
             }
-            // NEW: If BUNDLE_BONUS is used, delete all related split coupons (PAID_PACKAGE)
+            // NEW: If BUNDLE_BONUS is used, mark all related split coupons as USED
             else if (usedCoupon?.metadata?.source === 'BUNDLE_BONUS' && usedCoupon?.metadata?.transaction_id) {
                 const originalTransactionId = usedCoupon.metadata.transaction_id;
 
