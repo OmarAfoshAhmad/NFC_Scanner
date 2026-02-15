@@ -472,7 +472,7 @@ export default function ScanPage() {
                     }
                 }
             )
-            .subscribe((subscriptionStatus) => {
+            .subscribe(async (subscriptionStatus) => {
                 console.log(`[Realtime] Subscription status for Terminal ${selectedTerminal}:`, subscriptionStatus);
                 if (subscriptionStatus === 'SUBSCRIBED') {
                     setStatus('connected');
@@ -482,8 +482,17 @@ export default function ScanPage() {
                     console.log('[Realtime] ❌ Subscription closed for Terminal:', selectedTerminal);
                 } else if (subscriptionStatus === 'CHANNEL_ERROR' || subscriptionStatus === 'TIMED_OUT') {
                     setStatus('error');
-                    console.error(`[Realtime] ❌ Subscription Error (${subscriptionStatus}) for Terminal:`, selectedTerminal);
-                    toast.error(`${t('connection_error') || 'Connection Error'}: ${subscriptionStatus}`);
+                    console.error(`[Realtime] ❌ Subscription Error (${subscriptionStatus}) for Terminal: ${selectedTerminal}`);
+
+                    // ✅ AUTO-RETRY LOGIC: If timed out or error, try again after 5 seconds
+                    if (isMounted.current) {
+                        console.log(`[Realtime] Scheduling auto-retry in 5s... (Attempt associated with key: ${retryKey})`);
+                        setTimeout(() => {
+                            if (isMounted.current) {
+                                setRetryKey(prev => prev + 1);
+                            }
+                        }, 5000);
+                    }
                 } else {
                     console.warn(`[Realtime] ⚠️ Unexpected status: ${subscriptionStatus}`);
                     setStatus('waiting');
@@ -804,7 +813,7 @@ export default function ScanPage() {
                                                 setSelectedBranch(b.id.toString());
                                                 setSelectedTerminal('');
                                             }}
-                                            className={`flex items-center justify-between px-3 py-2 rounded-xl text-sm transition-all ${selectedBranch === b.id.toString() ? 'bg-blue-500 text-white shadow-lg shadow-blue-500/20' : 'bg-slate-900/50 text-slate-300 hover:bg-slate-900'}`}
+                                            className={`flex items-center justify-between px-3 py-2.5 rounded-xl text-sm transition-all ${selectedBranch === b.id.toString() ? 'bg-blue-500 text-white shadow-lg shadow-blue-500/20' : 'bg-slate-900/50 text-slate-300 hover:bg-slate-900'}`}
                                         >
                                             <span className="font-bold">{b.name}</span>
                                             {selectedBranch === b.id.toString() && <CheckCircle2 size={14} />}
@@ -1062,6 +1071,7 @@ function CheckoutForm({ customer, card, rewards, coupons, manualCampaigns, campa
     const [showPartialPayment, setShowPartialPayment] = useState(false);
     const [partialAmount, setPartialAmount] = useState('');
     const [showStore, setShowStore] = useState(false);
+    const [showAmountAlert, setShowAmountAlert] = useState(false);
     const customerCoupons = Array.isArray(coupons) ? coupons : [];
 
 
@@ -1354,6 +1364,12 @@ function CheckoutForm({ customer, card, rewards, coupons, manualCampaigns, campa
 
     // Toggle Selection
     const handleSelectCoupon = (group) => {
+        // ✅ NEW: Prevent selection if bill amount is 0 or empty
+        if (!amount || parseFloat(amount) <= 0) {
+            setShowAmountAlert(true); // Show professional dialog instead of toast
+            return;
+        }
+
         if (selectedCouponGroup?.id === group.id) {
             setSelectedCouponGroup(null); // Deselect
         } else {
@@ -1363,6 +1379,27 @@ function CheckoutForm({ customer, card, rewards, coupons, manualCampaigns, campa
 
     return (
         <div className="flex flex-col h-full relative">
+
+            {/* --- MISSING AMOUNT ALERT DIALOG --- */}
+            {showAmountAlert && (
+                <div className="absolute inset-0 z-[100] bg-slate-900/40 backdrop-blur-sm rounded-3xl p-6 flex items-center justify-center animate-in fade-in duration-200">
+                    <div className="w-full max-w-sm bg-slate-900 border border-slate-700 rounded-3xl p-8 shadow-2xl text-center transform animate-in zoom-in-95 duration-200">
+                        <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
+                            <Zap size={32} className="text-red-500" />
+                        </div>
+                        <h3 className="text-xl font-bold text-white mb-2">{t('security_note_title') || 'تنبيه'}</h3>
+                        <p className="text-slate-400 mb-8 leading-relaxed">
+                            {t('enter_amount_first')}
+                        </p>
+                        <button
+                            onClick={() => setShowAmountAlert(false)}
+                            className="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-4 rounded-2xl transition-all active:scale-95 shadow-lg shadow-red-500/20"
+                        >
+                            {t('confirm') || 'موافق'}
+                        </button>
+                    </div>
+                </div>
+            )}
 
             {/* --- PARTIAL PAYMENT MODAL --- */}
             {showPartialPayment && (
@@ -1499,7 +1536,7 @@ function CheckoutForm({ customer, card, rewards, coupons, manualCampaigns, campa
                                                 {bundle.name}
                                             </h3>
                                             <div className="flex items-baseline gap-1">
-                                                <span className={`text-4xl font-black ${isOwned ? 'text-slate-400' : 'text-blue-400'}`}>{bundle.reward_config?.value}%</span>
+                                                <span className={`text-4xl font-black ${isOwned ? 'text-slate-400' : 'text-blue-400'}`}>{bundle.reward_config?.type === 'PERCENTAGE' ? `${bundle.reward_config?.value}%` : bundle.reward_config?.value}</span>
                                             </div>
                                         </div>
                                         <div className="mt-3 flex flex-col gap-1.5">
@@ -1647,36 +1684,38 @@ function CheckoutForm({ customer, card, rewards, coupons, manualCampaigns, campa
                 ) : (
                     <div className="space-y-8 pb-8">
                         {Object.entries(
-                            walletItems.reduce((acc, item) => {
-                                // Group by campaign_id AND bundle_type to prevent mixing different bundle types
-                                const bundleType = item.metadata?.bundle_type || '';
-                                const groupKey = `${item.campaign_id || 'default'}_${bundleType}`;
+                            (walletItems || []).reduce((acc, item) => {
+                                // Group by bundle_id if available, otherwise by campaign_id
+                                // This ensures split bundles stay together even if some parts are used
+                                const bundleId = item.metadata?.bundle_id;
+                                const campaignId = item.campaign_id || 'manual';
+                                const bundleType = item.metadata?.bundle_type || 'regular';
+
+                                // Grouping Key logic: Priority to bundleId to keep siblings together
+                                const groupKey = bundleId ? `BNDL-${bundleId}` : `${campaignId}-${bundleType}`;
+
                                 if (!acc[groupKey]) acc[groupKey] = [];
                                 acc[groupKey].push(item);
                                 return acc;
                             }, {})
                         ).map(([groupKey, items]) => {
-                            // Consistent sorting: Bonus/Total cards first (will appear on the far right in RTL)
+                            // Consistent sorting: Bonus items last (left side in RTL)
                             const sortedItems = [...items].sort((a, b) => {
-                                const checkBonus = (item) => {
-                                    const name = (item.campaigns?.name || '').toLowerCase();
-                                    const part = String(item.part || '').toLowerCase();
-                                    return part === 'bonus' || part === 'total' || part === '0' || !item.part || name.includes('bonus') || name.includes('بونص');
-                                };
-                                const aIsBonus = checkBonus(a);
-                                const bIsBonus = checkBonus(b);
-                                if (aIsBonus && !bIsBonus) return -1;
-                                if (!aIsBonus && bIsBonus) return 1;
+                                const partA = a.metadata?.part;
+                                const partB = b.metadata?.part;
 
-                                // For non-bonus items, sort by part numeric value ascending
-                                const aPart = parseInt(a.part) || 999;
-                                const bPart = parseInt(b.part) || 999;
-                                return aPart - bPart;
+                                if (partA === 'BONUS') return 1;
+                                if (partB === 'BONUS') return -1;
+
+                                if (typeof partA === 'number' && typeof partB === 'number') {
+                                    return partA - partB;
+                                }
+                                return 0;
                             });
 
-                            // Get campaign name and bundle type from first item (all items in group have same campaign_id)
-                            const campaignName = items[0]?.campaigns?.name || 'default';
-                            const bundleType = items[0]?.metadata?.bundle_type || '';
+                            const firstItem = sortedItems[0];
+                            const campaignName = firstItem?.campaigns?.name || firstItem?.metadata?.bundle_type || 'مكافأة';
+                            const bundleType = firstItem?.metadata?.bundle_type || '';
                             const isMeatBundle = bundleType.includes('meat') || campaignName.toLowerCase().includes('لحم');
 
                             return (
@@ -1687,7 +1726,10 @@ function CheckoutForm({ customer, card, rewards, coupons, manualCampaigns, campa
                                             <span className="text-sm font-black text-slate-600 dark:text-slate-300 uppercase tracking-widest">
                                                 {campaignName}
                                             </span>
-                                            <span className="text-[10px] font-bold text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">{sortedItems.length}</span>
+                                            {/* Badge: Shows Remaining / Total (e.g., 3/5) */}
+                                            <span className="text-[10px] font-bold text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">
+                                                {sortedItems.length} / {(firstItem?.metadata?.total_parts || 4) + 1}
+                                            </span>
                                         </div>
                                         <div className="h-px flex-1 bg-slate-200 dark:bg-slate-700/50 mx-4" />
                                     </div>
@@ -1696,11 +1738,16 @@ function CheckoutForm({ customer, card, rewards, coupons, manualCampaigns, campa
                                         {sortedItems.map(coupon => {
                                             const reward = coupon.campaigns?.reward_config || {};
                                             const isSelected = selectedCouponGroup?.id === coupon.id;
-                                            const displayDiscount = coupon.individualDiscount !== null ? coupon.individualDiscount : reward.value;
-                                            const partLabel = coupon.part ? `${coupon.part}/4` : '';
-                                            const campaignName = (coupon.campaigns?.name || '').toLowerCase();
-                                            const bundleType = coupon.metadata?.bundle_type || '';
-                                            const isMeatBundle = bundleType.includes('meat') || campaignName.includes('لحم');
+                                            const displayDiscount = coupon.metadata?.discount_value || reward.value;
+
+                                            // Dynamic Part Label: part/total (e.g., 1/4)
+                                            const partNum = coupon.metadata?.part;
+                                            const totalParts = coupon.metadata?.total_parts || 4;
+                                            const partLabel = (partNum && partNum !== 'BONUS') ? `${partNum}/${totalParts}` : '';
+
+                                            const campaignNameStr = (coupon.campaigns?.name || '').toLowerCase();
+                                            const bType = coupon.metadata?.bundle_type || '';
+                                            const isMeat = bType.includes('meat') || campaignNameStr.includes('لحم');
 
                                             return (
                                                 <button
@@ -1709,10 +1756,10 @@ function CheckoutForm({ customer, card, rewards, coupons, manualCampaigns, campa
                                                     disabled={loading}
                                                     className={`relative group border p-2.5 rounded-2xl flex flex-col items-center justify-center min-w-[70px] h-20 transition-all shadow-xl disabled:opacity-50
                                                     ${isSelected
-                                                            ? isMeatBundle
+                                                            ? isMeat
                                                                 ? 'bg-red-600 border-red-400 scale-105 ring-4 ring-red-500/20'
                                                                 : 'bg-purple-600 border-purple-400 scale-105 ring-4 ring-purple-500/20'
-                                                            : isMeatBundle
+                                                            : isMeat
                                                                 ? 'bg-gradient-to-br from-red-900 to-red-950 border-red-800 hover:border-red-500 hover:scale-[1.05] active:scale-95'
                                                                 : 'bg-gradient-to-br from-slate-800 to-slate-900 border-slate-700 hover:border-purple-500 hover:scale-[1.05] active:scale-95'
                                                         }
@@ -1722,28 +1769,27 @@ function CheckoutForm({ customer, card, rewards, coupons, manualCampaigns, campa
                                                     {partLabel && (
                                                         <div className={`absolute -top-1.5 -right-1.5 text-[8px] font-black px-1.5 py-0.5 rounded-full z-10 
                                                         ${isSelected
-                                                                ? isMeatBundle ? 'bg-white text-red-600' : 'bg-white text-purple-600'
-                                                                : isMeatBundle
+                                                                ? isMeat ? 'bg-white text-red-600' : 'bg-white text-purple-600'
+                                                                : isMeat
                                                                     ? 'bg-gradient-to-br from-red-500 to-red-600 text-white border border-red-900'
                                                                     : 'bg-gradient-to-br from-amber-500 to-amber-600 text-white border border-slate-900'}`}>
                                                             {partLabel}
                                                         </div>
                                                     )}
-
                                                     {reward.type === 'PERCENTAGE' && (
-                                                        <span className={`text-xl font-black mb-0 transition-colors ${isSelected ? 'text-white' : isMeatBundle ? 'text-red-300 group-hover:text-red-200' : 'text-white group-hover:text-purple-400'}`}>
+                                                        <span className={`text-xl font-black mb-0 transition-colors ${isSelected ? 'text-white' : isMeat ? 'text-red-300 group-hover:text-red-200' : 'text-white group-hover:text-purple-400'}`}>
                                                             {displayDiscount}%
                                                         </span>
                                                     )}
                                                     <span className={`text-[9px] font-bold uppercase tracking-tighter text-center line-clamp-1 leading-none transition-colors mt-0.5
                                                     ${isSelected
-                                                            ? isMeatBundle ? 'text-red-200' : 'text-purple-200'
-                                                            : isMeatBundle ? 'text-red-400/70 group-hover:text-red-300' : 'text-slate-400 dark:text-slate-500 group-hover:text-purple-400/70'}
+                                                            ? isMeat ? 'text-red-200' : 'text-purple-200'
+                                                            : isMeat ? 'text-red-400/70 group-hover:text-red-300' : 'text-slate-400 dark:text-slate-500 group-hover:text-purple-400/70'}
                                                 `}>
                                                         {coupon.campaigns?.name}
                                                     </span>
 
-                                                    {!isSelected && <div className={`absolute inset-0 ${isMeatBundle ? 'bg-red-500/5' : 'bg-purple-500/5'} opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl`} />}
+                                                    {!isSelected && <div className={`absolute inset-0 ${isMeat ? 'bg-red-500/5' : 'bg-purple-500/5'} opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl`} />}
                                                 </button>
                                             );
                                         })}

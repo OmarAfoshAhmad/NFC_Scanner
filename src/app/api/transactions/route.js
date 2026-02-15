@@ -250,43 +250,84 @@ export async function POST(request) {
                 console.error('CRITICAL: Failed to mark coupon as USED:', updateErr);
             }
 
-            // NEW: If this coupon is from a bundle split (PAID_PACKAGE), mark the BUNDLE_BONUS as USED immediately
+            // NEW: If a PAID_PACKAGE split part is used, check if it's the LAST one before consuming BUNDLE_BONUS
             if (usedCoupon?.metadata?.source === 'PAID_PACKAGE' && usedCoupon?.metadata?.transaction_id) {
                 const originalTransactionId = usedCoupon.metadata.transaction_id;
+                const bundleId = usedCoupon.metadata.bundle_id;
 
-                // Find and immediately mark the BUNDLE_BONUS coupon as USED
-                const { data: bonusCoupon } = await supabaseAdmin
+                // Check for other ACTIVE PAID_PACKAGE parts in the SAME bundle
+                // (We MUST exclude BUNDLE_BONUS here otherwise otherParts will never be 0)
+                const { data: otherParts } = await supabaseAdmin
                     .from('customer_coupons')
-                    .select('*')
+                    .select('id')
                     .eq('customer_id', customer_id)
                     .eq('status', 'ACTIVE')
-                    .eq('metadata->>source', 'BUNDLE_BONUS')
-                    .eq('metadata->>transaction_id', originalTransactionId)
-                    .single();
+                    .eq('metadata->>bundle_id', bundleId)
+                    .eq('metadata->>source', 'PAID_PACKAGE') // Filter only for paid parts
+                    .neq('id', coupon_id);
 
-                if (bonusCoupon) {
-                    await supabaseAdmin
+                if (!otherParts || otherParts.length === 0) {
+                    // Last part used - consume bonus COMPLETELY
+                    const { data: bonusCoupon } = await supabaseAdmin
                         .from('customer_coupons')
-                        .update({
-                            status: 'USED',
-                            used_at: new Date().toISOString(),
-                            metadata: {
-                                ...bonusCoupon.metadata,
-                                disabled_by_split_use: true,
-                                disabled_at: new Date().toISOString()
-                            }
-                        })
-                        .eq('id', bonusCoupon.id);
+                        .select('id, metadata')
+                        .eq('customer_id', customer_id)
+                        .eq('status', 'ACTIVE')
+                        .eq('metadata->>source', 'BUNDLE_BONUS')
+                        .eq('metadata->>bundle_id', bundleId)
+                        .maybeSingle();
 
-                    console.log(`[BUNDLE] Split coupon used - BUNDLE_BONUS marked as USED immediately`);
+                    if (bonusCoupon) {
+                        await supabaseAdmin
+                            .from('customer_coupons')
+                            .update({
+                                status: 'USED',
+                                used_at: new Date().toISOString(),
+                                metadata: {
+                                    ...bonusCoupon.metadata,
+                                    consumed_with_last_part: true,
+                                    final_value_at_consumption: 0,
+                                    consumed_at: new Date().toISOString(),
+                                    trigger_coupon_id: coupon_id
+                                }
+                            })
+                            .eq('id', bonusCoupon.id);
+                        console.log(`[BUNDLE] Correctly Zeroed: Last part used - auto-consumed bonus for bundle ${bundleId}`);
+                    }
+                } else {
+                    // Reduce bonus value
+                    const usedDiscount = usedCoupon.metadata?.discount_value || 0;
+                    const { data: bonusCoupon } = await supabaseAdmin
+                        .from('customer_coupons')
+                        .select('*')
+                        .eq('customer_id', customer_id)
+                        .eq('status', 'ACTIVE')
+                        .eq('metadata->>source', 'BUNDLE_BONUS')
+                        .eq('metadata->>bundle_id', bundleId)
+                        .maybeSingle();
+
+                    if (bonusCoupon && usedDiscount > 0) {
+                        const currentBonusVal = bonusCoupon.metadata?.discount_value || 0;
+                        const newBonusVal = Math.max(0, currentBonusVal - usedDiscount);
+                        await supabaseAdmin
+                            .from('customer_coupons')
+                            .update({
+                                metadata: {
+                                    ...bonusCoupon.metadata,
+                                    discount_value: newBonusVal,
+                                    last_reduced_by: usedDiscount,
+                                    last_reduction_at: new Date().toISOString()
+                                }
+                            })
+                            .eq('id', bonusCoupon.id);
+                        console.log(`[BUNDLE] Reduced bonus from ${currentBonusVal} to ${newBonusVal}`);
+                    }
                 }
             }
             // NEW: If BUNDLE_BONUS is used, mark all related split coupons as USED
             else if (usedCoupon?.metadata?.source === 'BUNDLE_BONUS' && usedCoupon?.metadata?.transaction_id) {
                 const originalTransactionId = usedCoupon.metadata.transaction_id;
-
-                // Find and mark all related split coupons as USED
-                const { data: splitCoupons, error: splitErr } = await supabaseAdmin
+                const { data: splitCoupons } = await supabaseAdmin
                     .from('customer_coupons')
                     .select('id')
                     .eq('customer_id', customer_id)
@@ -296,26 +337,26 @@ export async function POST(request) {
 
                 if (splitCoupons && splitCoupons.length > 0) {
                     const splitIds = splitCoupons.map(c => c.id);
-
                     await supabaseAdmin
                         .from('customer_coupons')
                         .update({
                             status: 'USED',
                             used_at: new Date().toISOString(),
-                            metadata: {
-                                consumed_with_bonus: true,
-                                consumed_at: new Date().toISOString()
-                            }
+                            metadata: { consumed_with_bonus: true, consumed_at: new Date().toISOString() }
                         })
                         .in('id', splitIds);
-
-                    console.log(`[BUNDLE] Full bonus used - marked ${splitCoupons.length} split coupons as USED`);
+                    console.log(`[BUNDLE] Bonus used - marked ${splitCoupons.length} parts as USED`);
                 }
             }
         }
 
         // 5. Campaign Engine: Check for AUTO_SPEND Rewards
         let new_rewards = [];
+
+        // NEW: Check if we used a coupon for this transaction
+        // If we DID use a coupon, we skip the Stamp Card / Auto-Spend logic to prevent double rewards
+        const isCouponUse = !!coupon_id;
+
         try {
             // A. Explicit Bundle Purchase (if campaign_id provided)
             if (campaign_id) {
@@ -358,10 +399,10 @@ export async function POST(request) {
 
                         // First check explicit bundle_type from database
                         if (type === 'family') {
-                            return { splits: [3, 5, 7, 10], bonusBundle: total, label: 'عائلة' };
+                            return { splits: [10, 7, 5, 3], bonusBundle: total, label: 'عائلة' };
                         }
                         if (type === 'meat_family') {
-                            return { splits: [2, 2, 4, 4], bonusBundle: total, label: 'لحمة عائلة' };
+                            return { splits: [3, 3, 2, 2], bonusBundle: total, label: 'لحمة عائلة' };
                         }
                         if (type === 'youth') {
                             return { splits: [6, 6], bonusBundle: total, label: 'أفراد' };
@@ -374,13 +415,13 @@ export async function POST(request) {
                         // Fallback: analyze campaign name for backward compatibility
                         const lowerName = (name || '').toLowerCase();
                         if (lowerName.includes('عائل') && !lowerName.includes('لحم')) {
-                            return { splits: [3, 5, 7, 10], bonusBundle: 25, label: 'عائلة' };
+                            return { splits: [10, 7, 5, 3], bonusBundle: 25, label: 'عائلة' };
                         }
                         if (lowerName.includes('لحم') && lowerName.includes('عائل')) {
-                            return { splits: [2, 2, 3, 3], bonusBundle: 10, label: 'لحمة عائلة' };
+                            return { splits: [3, 3, 2, 2], bonusBundle: 10, label: 'لحمة عائلة' };
                         }
                         if (lowerName.includes('شباب')) {
-                            return { splits: [2, 4, 3, 3], bonusBundle: 12, label: 'شباب' };
+                            return { splits: [6, 6], bonusBundle: 12, label: 'شباب' };
                         }
                         if (lowerName.includes('لحم') && (lowerName.includes('افراد') || lowerName.includes('أفراد') || lowerName.includes('فرد'))) {
                             return { splits: [2.5, 2.5], bonusBundle: 5, label: 'لحمة أفراد' };
@@ -406,6 +447,9 @@ export async function POST(request) {
                     }
 
                     // Create split coupons
+                    const bundle_id = `BNDL-${Date.now()}`;
+                    const items_total_count = splits.length;
+
                     const couponsToInsert = splits.map((discountValue, index) => ({
                         customer_id,
                         campaign_id: targetCampaign.id,
@@ -414,7 +458,9 @@ export async function POST(request) {
                         metadata: {
                             source: 'PAID_PACKAGE',
                             transaction_id,
+                            bundle_id,
                             part: index + 1,
+                            total_parts: items_total_count,
                             discount_value: discountValue,
                             original_total: totalDiscount,
                             bundle_type: label
@@ -431,7 +477,9 @@ export async function POST(request) {
                         metadata: {
                             source: 'BUNDLE_BONUS',
                             transaction_id,
+                            bundle_id,
                             part: 'BONUS',
+                            total_parts: items_total_count,
                             discount_value: bonusBundle,
                             original_total: totalDiscount,
                             bundle_type: label
@@ -510,9 +558,8 @@ export async function POST(request) {
             // C. Stamp Card Progress (Only check if NOT an explicit package purchase)
             // If campaign_id was passed, we assume it was a paid package, so we might skip this OR let it run in parallel?
             // Usually buying a package shouldn't ALSO give you a stamp unless configured. 
-            // Let's keep existing "Price Match" logic as fallback if campaign_id missing, OR for Step C.
-
-            if (!campaign_id) {
+            // Also skip if this WAS a coupon use to avoid duplicate rewards
+            if (!campaign_id && !isCouponUse) {
                 const { data: bundleCampaigns } = await supabase
                     .from('campaigns')
                     .select('*')

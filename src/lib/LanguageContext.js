@@ -76,6 +76,7 @@ export const translations = {
         reset_confirm_title: 'تأكيد التصفير',
         build_status: 'حالة النظام',
         version_label: 'الإصدار',
+        enter_amount_first: 'الرجاء إدخال مبلغ الفاتورة أولاً قبل اختيار الحصة',
 
         // Admin Tools
         admin_reset_balance: 'تصفير الرصيد',
@@ -445,6 +446,7 @@ export const translations = {
         reset_confirm_title: 'Confirm Reset',
         build_status: 'Build Status',
         version_label: 'VERSION',
+        enter_amount_first: 'Please enter the bill amount first before selecting a quota',
 
         // Admin Tools
         admin_reset_balance: 'Reset Balance',
@@ -747,11 +749,19 @@ export const translations = {
 };
 
 export function LanguageProvider({ children }) {
-    const [language, setLanguage] = useState(() => {
-        if (typeof window === 'undefined') return 'ar';
-        return localStorage.getItem('app_lang') || 'ar';
-    });
-    const [mounted, setMounted] = useState(true);
+    // 🛡️ Fix Hydration Mismatch: Always start with 'ar' (server-side default)
+    const [language, setLanguage] = useState('ar');
+    const [mounted, setMounted] = useState(false);
+
+    useEffect(() => {
+        // Now we are on the client
+        const savedLang = localStorage.getItem('app_lang') || 'ar';
+        setLanguage(savedLang);
+        setMounted(true);
+
+        document.dir = savedLang === 'ar' ? 'rtl' : 'ltr';
+        document.lang = savedLang;
+    }, []);
 
     useEffect(() => {
         if (mounted) {
@@ -769,8 +779,8 @@ export function LanguageProvider({ children }) {
         setLanguage(prev => prev === 'ar' ? 'en' : 'ar');
     };
 
-    if (!mounted) return null;
-
+    // 🛡️ Fix Hydration: DO NOT return null. Render children with a default state ('ar') 
+    // and update once mounted to preserve server-side HTML.
     return (
         <LanguageContext.Provider value={{ language, setLanguage, t, toggleLanguage, dir: language === 'ar' ? 'rtl' : 'ltr' }}>
             {children}

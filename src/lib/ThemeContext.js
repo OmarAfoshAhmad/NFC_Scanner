@@ -5,18 +5,17 @@ const ThemeContext = createContext();
 
 export const ThemeProvider = ({ children }) => {
     // Initialize theme from localStorage or system preference
-    const [theme, setTheme] = useState(() => {
-        if (typeof window === 'undefined') return 'light';
+    // 🛡️ Fix Hydration: Start with a constant default
+    const [theme, setTheme] = useState('light');
 
+    useEffect(() => {
         const savedTheme = localStorage.getItem('theme');
-        if (savedTheme) return savedTheme;
-
-        if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-            return 'dark';
+        if (savedTheme) {
+            setTheme(savedTheme);
+        } else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+            setTheme('dark');
         }
-
-        return 'light';
-    });
+    }, []);
 
     useEffect(() => {
         // Apply theme class to html element

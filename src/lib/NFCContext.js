@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
 import { toast } from 'sonner';
 import { supabase } from './supabase';
 import { NfcReader } from './hardware/NfcReader';
@@ -99,7 +99,7 @@ export function NFCProvider({ children }) {
     useEffect(() => {
         // Only run on client side
         if (typeof window === 'undefined') return;
-        
+
         // ... (Existing implementation for Terminal selection & Supabase Realtime)
         // إذا لم يتم تحديد terminal، استخدم الافتراضي (1)
         const storedTerminalId = localStorage.getItem('selected_terminal');
@@ -180,18 +180,20 @@ export function NFCProvider({ children }) {
             ? (terminalInfo.metadata.device_name || 'Cloud Reader')
             : 'Disconnected');
 
-    const value = {
+    const onScan = useCallback((callback) => {
+        scanCallbacksRef.current.push(callback);
+        return () => {
+            scanCallbacksRef.current = scanCallbacksRef.current.filter(cb => cb !== callback);
+        };
+    }, []);
+
+    const value = React.useMemo(() => ({
         isConnected: !!isConnected,
         isHwConnected,
         isCloudConnected,
         readerName: readerName,
         connectHwReader, // New export
-        onScan: (callback) => {
-            scanCallbacksRef.current.push(callback);
-            return () => {
-                scanCallbacksRef.current = scanCallbacksRef.current.filter(cb => cb !== callback);
-            };
-        },
+        onScan,
         injectCard: async (uid) => {
             // ... (keep existing implementation)
             const terminalId = typeof window !== 'undefined' ? localStorage.getItem('selected_terminal') : null;
@@ -224,7 +226,7 @@ export function NFCProvider({ children }) {
                 throw e;
             }
         }
-    };
+    }), [isConnected, isHwConnected, isCloudConnected, readerName, onScan]); // Dependencies for useMemo
 
     return (
         <NFCContext.Provider value={value}>

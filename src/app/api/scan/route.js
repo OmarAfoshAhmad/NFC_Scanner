@@ -55,7 +55,6 @@ export async function POST(request) {
         }
 
         // ✅ SECURITY CHECK: Card must have a valid signature (unsigned cards rejected)
-        // Check metadata.secured which contains the real signature status from NFC Bridge
         let metadata = {};
         try {
             metadata = typeof card.metadata === 'string'
@@ -66,10 +65,11 @@ export async function POST(request) {
             metadata = {};
         }
 
-        if (!metadata || !metadata.secured) {
+        // Must have either the bridge-secured flag OR a cryptographic signature from enrollment
+        if ((!metadata || !metadata.secured) && !card.signature) {
             return NextResponse.json({
                 status: 'unsupported_card',
-                message: 'This card is not supported',
+                message: 'This card is not supported (Unsigned)',
                 uid
             });
         }
