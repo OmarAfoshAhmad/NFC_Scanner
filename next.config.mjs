@@ -1,5 +1,9 @@
 /** @type {import('next').NextConfig} */
-const nextConfig = {
+const withMDX = require('@next/mdx')({
+  extension: /\.mdx?$/,
+});
+
+const nextConfig = withMDX({
   distDir: '.next',
   output: 'standalone',
 
@@ -18,10 +22,13 @@ const nextConfig = {
     ignoreDuringBuilds: true,
   },
 
-  // Disable static page generation
+  // Experimental features
   experimental: {
     optimizePackageImports: ['lucide-react'],
+    webpackBuildWorker: true, // تفعيل عامل Webpack صراحة لتجنب مشاكل MDX
   },
+
+  pageExtensions: ['js', 'jsx', 'ts', 'tsx', 'mdx'], // التعرف على ملفات MDX كصفحات
 
   // Security Headers
   async headers() {
@@ -29,26 +36,19 @@ const nextConfig = {
       {
         source: '/:path*',
         headers: [
-          {
-            key: 'X-Frame-Options',
-            value: 'DENY'
-          },
-          {
-            key: 'X-Content-Type-Options',
-            value: 'nosniff'
-          },
-          {
-            key: 'Referrer-Policy',
-            value: 'strict-origin-when-cross-origin'
-          },
-          {
-            key: 'X-XSS-Protection',
-            value: '1; mode=block'
-          },
+          { key: 'X-Frame-Options', value: 'DENY' },
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          { key: 'X-XSS-Protection', value: '1; mode=block' },
         ],
       },
     ];
   },
-};
 
-export default nextConfig;
+  webpack(config, { isServer }) {
+    // أي تخصيصات Webpack إضافية هنا
+    return config;
+  },
+});
+
+module.exports = nextConfig;
