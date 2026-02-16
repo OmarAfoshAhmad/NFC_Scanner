@@ -1,9 +1,6 @@
 /** @type {import('next').NextConfig} */
-const withMDX = require('@next/mdx')({
-  extension: /\.mdx?$/,
-});
 
-const nextConfig = withMDX({
+const nextConfig = {
   distDir: '.next',
   output: 'standalone',
 
@@ -25,10 +22,10 @@ const nextConfig = withMDX({
   // Experimental features
   experimental: {
     optimizePackageImports: ['lucide-react'],
-    webpackBuildWorker: true, // تفعيل عامل Webpack صراحة لتجنب مشاكل MDX
+    webpackBuildWorker: true,
   },
 
-  pageExtensions: ['js', 'jsx', 'ts', 'tsx', 'mdx'], // التعرف على ملفات MDX كصفحات
+  pageExtensions: ['js', 'jsx', 'ts', 'tsx'],
 
   // Security Headers
   async headers() {
@@ -46,9 +43,8 @@ const nextConfig = withMDX({
   },
 
   webpack(config, { isServer }) {
-    // أي تخصيصات Webpack إضافية هنا
     return config;
   },
-});
+};
 
-module.exports = nextConfig;
+export default nextConfig;
