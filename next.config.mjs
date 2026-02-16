@@ -19,13 +19,12 @@ const nextConfig = {
     ignoreDuringBuilds: true,
   },
 
-  // Experimental features
+  // Experimental features disabled for stability on Windows
   experimental: {
     optimizePackageImports: ['lucide-react'],
-    webpackBuildWorker: true,
   },
 
-  pageExtensions: ['js', 'jsx', 'ts', 'tsx'],
+  pageExtensions: ['js', 'jsx'],
 
   // Security Headers
   async headers() {
