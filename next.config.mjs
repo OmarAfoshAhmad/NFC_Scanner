@@ -24,7 +24,7 @@ const nextConfig = {
     optimizePackageImports: ['lucide-react'],
   },
 
-  pageExtensions: ['js', 'jsx'],
+  // pageExtensions line removed
 
   // Security Headers
   async headers() {

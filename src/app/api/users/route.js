@@ -1,7 +1,7 @@
 // Triggered recompile to resolve stale build cache
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 import { getSession } from '@/lib/auth';
 import { logAudit } from '@/lib/audit';
 import { enforceMaintenance } from '@/lib/maintenance';
