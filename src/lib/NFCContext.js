@@ -12,6 +12,7 @@ export function NFCProvider({ children }) {
     const [lastRefresh, setLastRefresh] = useState(Date.now());
     const [hwReader, setHwReader] = useState(null);
     const [isHwConnected, setIsHwConnected] = useState(false);
+    const [mounted, setMounted] = useState(false);
 
     // Callbacks ref needs to be accessible by hardware listener
     const scanCallbacksRef = useRef([]);
@@ -152,6 +153,8 @@ export function NFCProvider({ children }) {
             fetchInitialStatus();
         }, 5000);
 
+        setMounted(true);
+
         const handleStorageChange = (e) => {
             if (e.key === 'selected_terminal') {
                 window.location.reload();
@@ -231,15 +234,19 @@ export function NFCProvider({ children }) {
     return (
         <NFCContext.Provider value={value}>
             {children}
-            {!isConnected && (
-                <div className="fixed bottom-4 right-4 bg-red-600/90 backdrop-blur-sm text-white px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest shadow-xl animate-pulse z-50">
-                    NFC Offline
-                </div>
-            )}
-            {isConnected && (
-                <div className={`fixed bottom-4 right-4 ${isHwConnected ? 'bg-amber-600' : 'bg-green-600'} backdrop-blur-sm text-white px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest shadow-xl z-50`}>
-                    {isHwConnected ? 'NFC: USB LOCAL' : 'NFC: CLOUD BRIDGE'}
-                </div>
+            {mounted && (
+                <>
+                    {!isConnected && (
+                        <div className="fixed bottom-4 right-4 bg-red-600/90 backdrop-blur-sm text-white px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest shadow-xl animate-pulse z-50" suppressHydrationWarning>
+                            NFC Offline
+                        </div>
+                    )}
+                    {isConnected && (
+                        <div className={`fixed bottom-4 right-4 ${isHwConnected ? 'bg-amber-600' : 'bg-green-600'} backdrop-blur-sm text-white px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest shadow-xl z-50`} suppressHydrationWarning>
+                            {isHwConnected ? 'NFC: USB LOCAL' : 'NFC: CLOUD BRIDGE'}
+                        </div>
+                    )}
+                </>
             )}
         </NFCContext.Provider>
     );

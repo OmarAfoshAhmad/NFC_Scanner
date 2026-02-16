@@ -424,7 +424,7 @@ export default function ScanPage() {
 
                         // Check if we are already busy
                         if (processingRef.current) {
-                            console.warn('[Realtime] IGNORED: Already busy processing another scan.');
+                            console.log('[Realtime] IGNORED: Already busy processing another scan.');
                             // Still update the UI to show the card is present if it's the same card
                             if (scanResultRef.current?.card?.uid === uid) {
                                 // Refresh logic could go here if needed
@@ -1378,7 +1378,7 @@ function CheckoutForm({ customer, card, rewards, coupons, manualCampaigns, campa
     };
 
     return (
-        <div className="flex flex-col h-full relative">
+        <div className="flex flex-col h-full relative" suppressHydrationWarning>
 
             {/* --- MISSING AMOUNT ALERT DIALOG --- */}
             {showAmountAlert && (
