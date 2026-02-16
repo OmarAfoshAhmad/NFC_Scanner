@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import { getSession } from '@/lib/auth';
-import bcrypt from 'bcryptjs';
+import bcrypt from 'bcrypt';
 import { handleApiError, successResponse } from '@/lib/errorHandler';
 
 export async function PUT(request, { params }) {

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
-import bcrypt from 'bcryptjs';
+import bcrypt from 'bcrypt';
 import { getSession } from '@/lib/auth';
 import { logAudit } from '@/lib/audit';
 

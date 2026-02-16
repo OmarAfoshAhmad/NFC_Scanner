@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import jwt from 'jsonwebtoken';
+// Migrated from jsonwebtoken to jose (via lib/auth)
 import { supabase } from '@/lib/supabase';
-import bcrypt from 'bcryptjs';
+import bcrypt from 'bcrypt';
 import { signToken } from '@/lib/auth';
 import { cookies } from 'next/headers';
 import { loginSchema } from '@/lib/schemas';
@@ -90,7 +90,7 @@ export async function POST(request) {
             .eq('ip_address', ip)
             .eq('username', username);
 
-        const token = signToken({ id: user.id, username: user.username, role: user.role });
+        const token = await signToken({ id: user.id, username: user.username, role: user.role });
 
         const cookieStore = await cookies();
         cookieStore.set(AUTH.COOKIE_NAME, token, {

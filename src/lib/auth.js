@@ -1,4 +1,4 @@
-import jwt from 'jsonwebtoken';
+import { SignJWT, jwtVerify } from 'jose';
 import { cookies } from 'next/headers';
 import { AUTH, ENV } from './constants.js';
 import { authLogger } from './logger.js';
@@ -22,14 +22,22 @@ if (ENV.isDevelopment && JWT_SECRET.length < 32) {
     );
 }
 
-export function signToken(payload) {
-    return jwt.sign(payload, JWT_SECRET, { expiresIn: AUTH.JWT_EXPIRY });
+const encodedSecret = new TextEncoder().encode(JWT_SECRET);
+
+export async function signToken(payload) {
+    return await new SignJWT(payload)
+        .setProtectedHeader({ alg: 'HS256' })
+        .setIssuedAt()
+        .setExpirationTime(AUTH.JWT_EXPIRY || '24h')
+        .sign(encodedSecret);
 }
 
-export function verifyToken(token) {
+export async function verifyToken(token) {
     try {
-        return jwt.verify(token, JWT_SECRET);
+        const { payload } = await jwtVerify(token, encodedSecret);
+        return payload;
     } catch (error) {
+        authLogger.error('JWT Verification failed', error);
         return null;
     }
 }
@@ -38,5 +46,5 @@ export async function getSession() {
     const cookieStore = await cookies();
     const token = cookieStore.get('token')?.value;
     if (!token) return null;
-    return verifyToken(token);
+    return await verifyToken(token);
 }
